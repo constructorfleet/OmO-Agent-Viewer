@@ -27,7 +27,7 @@ omo-agents --project ~/src/my-project --state-dir /path/to/senpi-task
 omo-agents --wrap -- -c
 ```
 
-`--wrap` starts OmO and the viewer in side-by-side tmux panes, focused on OmO. Use tmux's pane switch shortcut (default `Ctrl-b`, then `o`) to move to the viewer and back. Arguments after `--` are passed to `omo`; omit them to start a new session. The terminal tab is titled with the project name. When run inside tmux, the wrapper switches to the new split session; otherwise it attaches to it.
+`--wrap` starts OmO and the viewer in side-by-side tmux panes, focused on OmO. Use tmux's pane switch shortcut (default `Ctrl-b`, then `o`) to move to the viewer and back. Arguments after `--` are passed to `omo`; omit them to start a new session. The terminal tab is titled with the project name. When run inside tmux, the wrapper switches to the new split session; otherwise it starts the session on a tmux server of its own (socket named after the session) and attaches to it, so several wrapped tabs do not slow each other's redraws. To reattach after detaching, run `tmux -L <session> attach`; `tmux -L <session> ls` lists it.
 
 The viewer discovers the configured OmO Native agent directory and falls back to the legacy in-project `.omo/senpi-task` store when it contains task records. Use `--state-dir` if the store is somewhere else.
 

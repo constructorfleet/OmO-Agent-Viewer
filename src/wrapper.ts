@@ -43,7 +43,10 @@ export function buildTmuxPlan(options: TmuxPlanOptions): TmuxPlan {
       ? ["switch-client", "-t", options.sessionName]
       : ["attach-session", "-t", options.sessionName],
   ]
-  return commands
+  if (options.insideTmux) return commands
+  // One tmux server parses and redraws every pane it hosts on a single thread, so wrapped
+  // sessions sharing the default server throttle each other. Outside tmux, give each its own.
+  return commands.map((command) => ["-L", options.sessionName, ...command])
 }
 
 export type TmuxRunner = (args: TmuxCommand) => { readonly status: number | null; readonly error?: Error }
@@ -52,7 +55,8 @@ export function runTmuxPlan(plan: TmuxPlan, runner: TmuxRunner = runTmux): void 
   for (const args of plan) {
     const result = runner(args)
     if (result.error !== undefined) throw new Error(`Could not run tmux: ${result.error.message}`)
-    if (result.status !== 0) throw new Error(`tmux ${args[0]} failed${result.status === null ? "" : ` (exit ${result.status})`}`)
+    const subcommand = args[0] === "-L" ? args[2] : args[0]
+    if (result.status !== 0) throw new Error(`tmux ${subcommand} failed${result.status === null ? "" : ` (exit ${result.status})`}`)
   }
 }
 

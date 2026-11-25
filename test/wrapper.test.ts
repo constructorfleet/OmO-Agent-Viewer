@@ -31,7 +31,18 @@ describe("tmux wrapper plan", () => {
       insideTmux: false,
     })
     expect(plan[0]?.at(-1)).toBe(String.raw`exec 'omo' 'say '\''hello'\'''`)
-    expect(plan.at(-1)).toEqual(["attach-session", "-t", "omo-agents-42"])
+    expect(plan.at(-1)).toEqual(["-L", "omo-agents-42", "attach-session", "-t", "omo-agents-42"])
+  })
+
+  test("#given a launch outside tmux #when building a plan #then every command targets a server of its own", () => {
+    const plan = buildTmuxPlan({
+      projectDir: "/tmp",
+      sessionName: "omo-agents-9",
+      omoArgs: [],
+      viewerCommand: ["bun", "main.js"],
+      insideTmux: false,
+    })
+    expect(plan.every((command) => command[0] === "-L" && command[1] === "omo-agents-9")).toBe(true)
   })
 
   test("#given a project name with a hash #when setting the tab title #then tmux receives it as a literal", () => {
