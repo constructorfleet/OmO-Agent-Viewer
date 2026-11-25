@@ -1,3 +1,5 @@
+import { basename } from "node:path"
+
 import { BoxRenderable, RGBA, StyledText, TextRenderable, bold, createCliRenderer, dim } from "@opentui/core"
 
 import { isTerminalDagState } from "./dag.js"
@@ -49,7 +51,7 @@ const ZERO_LIMITS: ViewerLimits = { transcriptScroll: 0, todoScroll: 0 }
 
 export async function runViewer(options: ViewerOptions): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false })
-  renderer.setTerminalTitle("OmO Agent Viewer")
+  renderer.setTerminalTitle(`${basename(options.projectDir) || options.projectDir} · OmO Agent Viewer`)
   const shell = new BoxRenderable(renderer, {
     width: "100%",
     height: "100%",

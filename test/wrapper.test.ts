@@ -14,6 +14,8 @@ describe("tmux wrapper plan", () => {
 
     expect(plan).toEqual([
       ["new-session", "-d", "-s", "omo-agents-42", "-n", "omo", "-c", "/work/my project", "exec 'omo' '--resume' 'session id'"],
+      ["set-option", "-t", "omo-agents-42", "set-titles", "on"],
+      ["set-option", "-t", "omo-agents-42", "set-titles-string", "my project · omo"],
       ["split-window", "-h", "-t", "omo-agents-42:omo", "-c", "/work/my project", "exec 'bun' '/app/main.js' '--project' '/work/my project'"],
       ["select-pane", "-l", "-t", "omo-agents-42:omo"],
       ["switch-client", "-t", "omo-agents-42"],
@@ -30,6 +32,17 @@ describe("tmux wrapper plan", () => {
     })
     expect(plan[0]?.at(-1)).toBe(String.raw`exec 'omo' 'say '\''hello'\'''`)
     expect(plan.at(-1)).toEqual(["attach-session", "-t", "omo-agents-42"])
+  })
+
+  test("#given a project name with a hash #when setting the tab title #then tmux receives it as a literal", () => {
+    const plan = buildTmuxPlan({
+      projectDir: "/work/issue#12",
+      sessionName: "omo-agents-1",
+      omoArgs: [],
+      viewerCommand: ["bun", "main.js"],
+      insideTmux: true,
+    })
+    expect(plan).toContainEqual(["set-option", "-t", "omo-agents-1", "set-titles-string", "issue##12 · omo"])
   })
 
   test("#given a tmux command runner #when executing the plan #then every pane and attach command is dispatched in order", () => {

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process"
+import { basename } from "node:path"
 
 export interface TmuxPlanOptions {
   readonly projectDir: string
@@ -25,6 +26,9 @@ export function buildTmuxPlan(options: TmuxPlanOptions): TmuxPlan {
       options.projectDir,
       shellCommand(["omo", ...options.omoArgs]),
     ],
+    // Session-scoped, so the terminal tab names this project only while this session is shown.
+    ["set-option", "-t", options.sessionName, "set-titles", "on"],
+    ["set-option", "-t", options.sessionName, "set-titles-string", tmuxLiteral(terminalTitle(options.projectDir))],
     [
       "split-window",
       "-h",
@@ -58,6 +62,15 @@ function runTmux(args: TmuxCommand): { readonly status: number | null; readonly 
     status: result.status,
     ...(result.error === undefined ? {} : { error: result.error }),
   }
+}
+
+export function terminalTitle(projectDir: string): string {
+  return `${basename(projectDir) || projectDir} · omo`
+}
+
+/** `set-titles-string` is a tmux format; `##` keeps a literal `#` in a project name. */
+function tmuxLiteral(value: string): string {
+  return value.replaceAll("#", "##")
 }
 
 function shellCommand(parts: readonly string[]): string {
