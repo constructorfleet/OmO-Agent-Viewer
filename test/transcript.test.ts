@@ -21,6 +21,24 @@ const toolResult = (toolCallId: string, toolName: string, text: string, isError 
     message: { role: "toolResult", toolCallId, toolName, isError, content: [{ type: "text", text }] },
   })
 
+const toolResultWithDetails = (
+  toolCallId: string,
+  toolName: string,
+  text: string,
+  details: unknown,
+): string =>
+  JSON.stringify({
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolCallId,
+      toolName,
+      isError: false,
+      content: [{ type: "text", text }],
+      details,
+    },
+  })
+
 describe("parseEventTranscript", () => {
   test("#given task event JSONL #when parsed #then assistant, tool and error activity is readable", () => {
     const text = [
@@ -111,6 +129,69 @@ describe("parseSessionTurns", () => {
       "result(read): Read image file [image/png] [1 image]",
     ])
     expect(document.lines.join("\n")).not.toContain("cG5nLWJ5dGVz")
+  })
+
+  test("#given todo calls batched inside eval #when parsed #then the checklist comes from the nested details", () => {
+    const text = [
+      assistant("turn-a", [{ type: "toolCall", id: "call-eval", name: "eval", arguments: { code: "await tool.todo(...)" } }]),
+      toolResultWithDetails("call-eval", "eval", "TODO started", {
+        toolCalls: [
+          { name: "read", ok: true, args: { path: "/tmp/plan.md" } },
+          {
+            name: "todo",
+            ok: true,
+            args: { op: "start", task: "Build the widget" },
+            details: {
+              op: "start",
+              storage: "session",
+              phases: [
+                {
+                  name: "Wave 1",
+                  tasks: [
+                    { content: "Read the code", status: "completed" },
+                    { content: "Build the widget", status: "in_progress" },
+                  ],
+                },
+                {
+                  name: "Wave 2",
+                  tasks: [
+                    { content: "Drop the old path", status: "abandoned" },
+                    { content: "Test the widget", status: "pending" },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ].join("\n")
+
+    const turns = parseSessionTurns(text)
+    expect(turns[0]?.results[0]?.todo).toEqual({
+      done: 2,
+      total: 4,
+      open: 2,
+      now: "Build the widget (Wave 1)",
+      next: "Test the widget (Wave 2)",
+      activePhase: "Wave 1",
+      phases: [
+        {
+          name: "Wave 1",
+          items: [
+            { text: "Read the code", status: "completed" },
+            { text: "Build the widget", status: "in_progress" },
+          ],
+        },
+        {
+          name: "Wave 2",
+          items: [{ text: "Test the widget", status: "pending" }],
+        },
+      ],
+      remaining: [
+        { text: "Build the widget", status: "in_progress" },
+        { text: "Test the widget", status: "pending" },
+      ],
+    })
   })
 })
 
@@ -216,6 +297,40 @@ describe("buildTranscriptDocument", () => {
     const document = buildTranscriptDocument(turns)
     expect(document.todo).toMatchObject({ done: 0, total: 1, open: 1, activePhase: "Phase" })
     expect(document.lines).toEqual(["assistant: done"])
+  })
+
+  test("#given a main session whose newest todo is nested in eval #when built #then the document carries it", () => {
+    const text = [
+      assistant("turn-a", [{ type: "toolCall", id: "call-eval", name: "eval", arguments: {} }]),
+      toolResultWithDetails("call-eval", "eval", "TODO started", {
+        toolCalls: [
+          {
+            name: "todo",
+            ok: true,
+            args: { op: "start", task: "Step" },
+            details: {
+              op: "start",
+              phases: [{ name: "Phase", tasks: [{ content: "Step", status: "in_progress" }] }],
+            },
+          },
+        ],
+      }),
+      assistant("turn-b", [{ type: "text", text: "still working" }]),
+    ].join("\n")
+
+    const document = buildTranscriptDocument(parseSessionTurns(text))
+    expect(document.todo).toMatchObject({
+      done: 0,
+      total: 1,
+      open: 1,
+      now: "Step (Phase)",
+      activePhase: "Phase",
+    })
+    expect(document.lines).toEqual([
+      "tool: eval",
+      "result(eval): TODO started",
+      "assistant: still working",
+    ])
   })
 
   test("#given turns and errors #when built #then every line names its turn and errors stay unattached", () => {

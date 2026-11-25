@@ -49,6 +49,8 @@ export interface TranscriptToolResult {
   readonly isError: boolean
   readonly text?: string
   readonly images?: readonly TranscriptImage[]
+  /** Checklist carried by a todo call, including calls nested inside an eval tool result. */
+  readonly todo?: TodoState
 }
 
 export interface TranscriptImage {
@@ -186,12 +188,83 @@ function lastTodoReport(turns: readonly TranscriptTurn[]): TodoState | undefined
     const results = turns[turnIndex]?.results ?? []
     for (let index = results.length - 1; index >= 0; index -= 1) {
       const result = results[index]
+      if (result?.todo !== undefined) return result.todo
       if (result?.name !== "todo" || result.text === undefined) continue
       const todo = parseTodoReport(result.text)
       if (todo !== undefined) return todo
     }
   }
   return undefined
+}
+
+/**
+ * The main agent now batches todo calls inside `eval`, so the checklist lives in the eval
+ * result's `details` instead of a top-level `todo` result. Older direct results carry the
+ * same `details` shape; prefer it so abandoned items and counts match the rendered report.
+ */
+function resultTodo(message: Record<string, unknown>): TodoState | undefined {
+  const direct = parseTodoDetails(message.details)
+  if (direct !== undefined) return direct
+  const details = message.details
+  if (!isRecord(details) || !Array.isArray(details.toolCalls)) return undefined
+  let todo: TodoState | undefined
+  for (const call of details.toolCalls) {
+    if (!isRecord(call) || call.name !== "todo") continue
+    const parsed = parseTodoDetails(call.details)
+    if (parsed !== undefined) todo = parsed
+  }
+  return todo
+}
+
+function parseTodoDetails(value: unknown): TodoState | undefined {
+  if (!isRecord(value) || !Array.isArray(value.phases)) return undefined
+  const phases: TodoPhase[] = []
+  const openItems: { readonly item: TodoItem; readonly phase: string }[] = []
+  let done = 0
+  let total = 0
+  for (const phaseValue of value.phases) {
+    if (!isRecord(phaseValue) || typeof phaseValue.name !== "string" || !Array.isArray(phaseValue.tasks)) continue
+    const items: TodoItem[] = []
+    for (const taskValue of phaseValue.tasks) {
+      if (!isRecord(taskValue) || typeof taskValue.content !== "string") continue
+      total += 1
+      if (taskValue.status === "abandoned") {
+        // The rendered report drops abandoned steps but still counts them as done.
+        done += 1
+        continue
+      }
+      const status: TodoStatus =
+        taskValue.status === "completed"
+          ? "completed"
+          : taskValue.status === "in_progress"
+            ? "in_progress"
+            : "pending"
+      if (status === "completed") done += 1
+      else openItems.push({ item: { text: taskValue.content, status }, phase: phaseValue.name })
+      items.push({ text: taskValue.content, status })
+    }
+    if (items.length > 0) phases.push({ name: phaseValue.name, items })
+  }
+  if (total === 0) return undefined
+
+  const inProgressIndex = openItems.findIndex((entry) => entry.item.status === "in_progress")
+  const nowIndex = inProgressIndex === -1 ? 0 : inProgressIndex
+  const nowEntry = openItems[nowIndex]
+  const nextEntry = openItems[nowIndex + 1]
+  return {
+    done,
+    total,
+    open: total - done,
+    ...(nowEntry === undefined ? {} : { now: todoEntryLabel(nowEntry) }),
+    ...(nextEntry === undefined ? {} : { next: todoEntryLabel(nextEntry) }),
+    ...(nowEntry === undefined ? {} : { activePhase: nowEntry.phase }),
+    phases,
+    remaining: openItems.map((entry) => entry.item),
+  }
+}
+
+function todoEntryLabel(entry: { readonly item: TodoItem; readonly phase: string }): string {
+  return entry.phase.length === 0 ? entry.item.text : `${entry.item.text} (${entry.phase})`
 }
 
 export function buildEventDocument(lines: readonly string[]): TranscriptDocument {
@@ -234,12 +307,14 @@ export function parseSessionTurns(text: string): readonly TranscriptTurn[] {
     } else if (message.role === "toolResult") {
       const text = resultText(message.content)
       const images = resultImages(message.content)
+      const todo = resultTodo(message)
       const result: TranscriptToolResult = {
         isError: message.isError === true,
         ...(typeof message.toolCallId === "string" ? { callId: message.toolCallId } : {}),
         ...(typeof message.toolName === "string" ? { name: safeText(message.toolName) } : {}),
         ...(text === undefined ? {} : { text }),
         ...(images === undefined ? {} : { images }),
+        ...(todo === undefined ? {} : { todo }),
       }
       const target = result.callId === undefined ? undefined : turnByCallId.get(result.callId)
       ;(target ?? current)?.results.push(result)
